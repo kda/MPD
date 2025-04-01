@@ -73,7 +73,7 @@ class AlsaOutput final
 	mutable Mutex attributes_mutex;
 
 	/** the libasound PCM device handle */
-	snd_pcm_t *pcm;
+	snd_pcm_t *pcm = nullptr;
 
 	/**
 	 * The size of one audio frame passed to method play().
@@ -455,12 +455,37 @@ AlsaOutput::GetAttributes() const noexcept
 {
 	const std::scoped_lock lock{attributes_mutex};
 
-	return {
+  std::map<std::string, std::string> retval = {
 		{"allowed_formats", Alsa::ToString(allowed_formats)},
 #ifdef ENABLE_DSD
 		{"dop", dop_setting ? "1" : "0"},
 #endif
-	};
+ 	};
+  if (pcm == nullptr) {
+    return retval;
+  }
+  if (snd_pcm_state(pcm) == SND_PCM_STATE_RUNNING) {
+    snd_pcm_hw_params_t *hwparams;
+    snd_pcm_hw_params_alloca(&hwparams);
+    int err = snd_pcm_hw_params_current(pcm, hwparams);
+    if (err < 0)
+      return retval;
+    snd_pcm_format_t format;
+    if (snd_pcm_hw_params_get_format(hwparams, &format) == 0) {
+      retval["alsa_format_name"] = snd_pcm_format_name(format);
+      retval["alsa_format_description"] = snd_pcm_format_description(format);
+    }
+    int bits = snd_pcm_hw_params_get_sbits(hwparams);
+    if (bits > -1) {
+      retval["bits_per_sample"] = std::to_string(bits);
+    }
+    unsigned int rate;
+    err = snd_pcm_hw_params_get_rate(hwparams, &rate, NULL);
+    if (err == 0) {
+      retval["sample_rate"] = std::to_string(rate);
+    }
+  }
+  return retval;
 }
 
 void
@@ -826,6 +851,7 @@ AlsaOutput::Open(AudioFormat &audio_format)
 			   );
 	} catch (...) {
 		snd_pcm_close(pcm);
+    pcm = nullptr;
 		std::throw_with_nested(FmtRuntimeError("Error opening ALSA device {:?}",
 						       GetDevice()));
 	}
@@ -1162,6 +1188,7 @@ AlsaOutput::Close() noexcept
 	period_buffer.Free();
 	ring_buffer = {};
 	snd_pcm_close(pcm);
+  pcm = nullptr;
 	delete[] silence;
 }
 
