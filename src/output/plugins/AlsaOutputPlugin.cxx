@@ -455,7 +455,7 @@ AlsaOutput::GetAttributes() const noexcept
 {
 	const std::scoped_lock lock{attributes_mutex};
 
-  std::map<std::string, std::string> retval = {
+  std::map<std::string, std::string, std::less<>> retval = {
 		{"allowed_formats", Alsa::ToString(allowed_formats)},
 #ifdef ENABLE_DSD
 		{"dop", dop_setting ? "1" : "0"},
